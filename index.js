@@ -1,5 +1,15 @@
 import puppeteer from "puppeteer";
 
+const normalizeTwitterUrl = (input) => {
+  // Handle both usernames and full URLs
+  if (input.startsWith('http')) {
+    return input;
+  }
+  // Remove @ if present
+  const username = input.startsWith('@') ? input.slice(1) : input;
+  return `https://x.com/${username}`;
+};
+
 const getProfileInfo = async (page) => {
   // Wait longer for content to load
   await page.waitForSelector('[data-testid="UserName"]', { timeout: 10000 });
@@ -33,27 +43,23 @@ const getProfileInfo = async (page) => {
 const getRecentTweets = async (page) => {
   await page.waitForSelector('article', { timeout: 20000 });
   
-  // First, let's scroll a bit to ensure recent tweets are loaded
   await page.evaluate(async () => {
     await new Promise((resolve) => {
       window.scrollBy(0, window.innerHeight * 2);
-      setTimeout(resolve, 2000);  // Wait for content to load
+      setTimeout(resolve, 2000);
     });
   });
 
   const tweets = await page.evaluate(() => {
     try {
-      // Get all tweet articles and convert to array
       const tweetElements = [...document.querySelectorAll("article")];
       
-      // Map each tweet element to its data
       const tweets = tweetElements.map((el) => {
         const getTextOrDefault = (selector, defaultValue = '0') => {
           const element = el.querySelector(selector);
           return element ? element.innerText : defaultValue;
         };
 
-        // Extract timestamp for sorting
         const timestamp = el.querySelector("time")?.dateTime || 'N/A';
         
         return {
@@ -70,9 +76,8 @@ const getRecentTweets = async (page) => {
         };
       });
 
-      // Sort tweets by date (most recent first) and take the first 5
       return tweets
-        .filter(tweet => tweet.submitted) // Remove any tweets without valid timestamps
+        .filter(tweet => tweet.submitted)
         .sort((a, b) => new Date(b.submitted) - new Date(a.submitted))
         .slice(0, 5);
         
@@ -85,8 +90,10 @@ const getRecentTweets = async (page) => {
   return tweets;
 };
 
-const getTwitterData = async (url) => {
+const getTwitterData = async (accounts) => {
   let browser;
+  const results = {};
+  
   try {
     browser = await puppeteer.launch({
       headless: "new",
@@ -101,7 +108,6 @@ const getTwitterData = async (url) => {
 
     const page = await browser.newPage();
     
-    // Block unnecessary resources for faster loading
     await page.setRequestInterception(true);
     page.on('request', (req) => {
       if (['stylesheet', 'font', 'image'].includes(req.resourceType())) {
@@ -114,25 +120,42 @@ const getTwitterData = async (url) => {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1280, height: 800 });
 
-    await page.goto(url, { 
-      waitUntil: "domcontentloaded",
-      timeout: 40000 
-    });
+    // Process each account sequentially
+    for (const account of accounts) {
+      const url = normalizeTwitterUrl(account);
+      console.log(`Scraping account: ${url}`);
+      
+      try {
+        await page.goto(url, { 
+          waitUntil: "domcontentloaded",
+          timeout: 40000 
+        });
 
-    const profileData = await getProfileInfo(page);
-    const recentTweets = await getRecentTweets(page);
+        const profileData = await getProfileInfo(page);
+        const recentTweets = await getRecentTweets(page);
 
-    return {
-      ...profileData,
-      tweetCount: recentTweets.length,
-      tweets: recentTweets,
-      scrapedAt: new Date().toISOString()
-    };
+        results[account] = {
+          ...profileData,
+          tweetCount: recentTweets.length,
+          tweets: recentTweets,
+          scrapedAt: new Date().toISOString()
+        };
+      } catch (error) {
+        console.error(`Error scraping ${account}:`, error);
+        results[account] = {
+          error: 'Failed to fetch Twitter data',
+          details: error.message,
+          timestamp: new Date().toISOString()
+        };
+      }
+    }
+
+    return results;
 
   } catch (error) {
     console.error('Error during scraping:', error);
     return {
-      error: 'Failed to fetch Twitter data',
+      error: 'Failed to initialize scraper',
       details: error.message,
       timestamp: new Date().toISOString()
     };
@@ -147,8 +170,14 @@ const getTwitterData = async (url) => {
 const run = async () => {
   try {
     console.log('Starting scrape...');
-    const data = await getTwitterData("https://x.com/elonmusk");
-    console.log('Recent tweets:', JSON.stringify(data, null, 2));
+    // You can now pass an array of usernames or URLs
+    const accounts = [
+      'elonmusk',
+      'https://x.com/orangie'
+    ];
+    
+    const data = await getTwitterData(accounts);
+    console.log('Results:', JSON.stringify(data, null, 2));
   } catch (error) {
     console.error('Failed to run scraper:', error);
   }

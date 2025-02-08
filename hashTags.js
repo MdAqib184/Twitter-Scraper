@@ -178,8 +178,8 @@ async function scrapeTwitterHashtags(credentials, hashtags) {
 
 // Example usage:
 const credentials = {
-  username: 'MPain2025',
-  password: 'Blue2025#'
+  username: 'your_username',
+  password: 'your_password'
 };
 
 const hashtags = ['#crypto', '#bitcoin'];

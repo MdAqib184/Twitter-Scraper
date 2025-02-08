@@ -41,7 +41,7 @@ const getProfileInfo = async (page) => {
 };
 
 const getRecentTweets = async (page) => {
-  await page.waitForSelector('article', { timeout: 20000 });
+  await page.waitForSelector('article', { timeout: 40000 });
   
   await page.evaluate(async () => {
     await new Promise((resolve) => {

@@ -1,57 +1,70 @@
 // hashtagScraper.js
-const { parentPort, workerData } = require("worker_threads");
 const puppeteer = require("puppeteer");
-const axios = require("axios");
+const { parentPort, workerData } = require("worker_threads");
 
-const { config } = workerData;
+let browser = null;
+let page = null;
 
-class HashtagScraper {
-  constructor(browser) {
-    this.browser = browser;
-  }
-
-  formatHashtagTweetForDiscord(tweet, hashtag) {
-    return {
-      embeds: [
-        {
-          title: `New #${hashtag} Tweet`,
-          description: tweet.text,
-          author: {
-            name: `${tweet.author} (${tweet.username})`,
-          },
-          color: 3447003,
-          fields: [
-            { name: "Likes", value: tweet.likes, inline: true },
-            { name: "Retweets", value: tweet.retweets, inline: true },
-            { name: "Replies", value: tweet.replies, inline: true },
-          ],
-          timestamp: tweet.timestamp,
-        },
-      ],
-    };
-  }
-
-  async scrapeHashtags(hashtags) {
-    const page = await this.browser.newPage();
-    await page.setRequestInterception(true);
-    page.on("request", (req) => {
-      if (["stylesheet", "font", "image"].includes(req.resourceType())) {
-        req.abort();
-      } else {
-        req.continue();
-      }
+async function initializeBrowser() {
+  if (!browser) {
+    browser = await puppeteer.launch({
+      headless: false,
+      args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
+  }
+  return browser;
+}
+
+async function getPage() {
+  if (!page) {
+    page = await browser.newPage();
+    // Login only when creating a new page
+    await login(page, workerData.config.twitter.credentials);
+  }
+  return page;
+}
+
+async function login(page, credentials) {
+  try {
+    await page.goto("https://twitter.com/i/flow/login");
+    await page.waitForSelector('input[autocomplete="username"]');
+    await page.type('input[autocomplete="username"]', credentials.username);
+    await page.keyboard.press("Enter");
+
+    await page.waitForSelector('input[type="password"]');
+    await page.type('input[type="password"]', credentials.password);
+    await page.keyboard.press("Enter");
+
+    await page.waitForSelector('a[aria-label="Home"]', { timeout: 30000 });
+    console.log("Login successful");
+  } catch (error) {
+    console.error("Login failed:", error);
+    throw error;
+  }
+}
+
+async function scrapeHashtags(hashtags) {
+  try {
+    await initializeBrowser();
+    const currentPage = await getPage();
+    const results = {};
 
     for (const hashtag of hashtags) {
       try {
         const term = hashtag.startsWith("#") ? hashtag.slice(1) : hashtag;
-        await page.goto(
-          `https://twitter.com/search?q=%23${term}&src=typed_query&f=live`,
-          { waitUntil: "domcontentloaded", timeout: 40000 }
+        await currentPage.goto(
+          `https://twitter.com/search?q=%23${term}&src=typed_query&f=live`
         );
-        await page.waitForSelector("article", { timeout: 40000 });
+        await currentPage.waitForSelector("article");
 
-        const tweets = await page.evaluate(() => {
+        // Scroll to load more tweets
+        await currentPage.evaluate(() => {
+          window.scrollBy(0, window.innerHeight * 2);
+          return new Promise((resolve) => setTimeout(resolve, 2000));
+        });
+
+        // Extract tweets
+        const tweets = await currentPage.evaluate(() => {
           return [...document.querySelectorAll("article")].map((tweet) => ({
             author:
               tweet
@@ -72,62 +85,57 @@ class HashtagScraper {
           }));
         });
 
-        if (tweets.length > 0) {
-          const latestTweet = tweets[0];
-          await this.sendToDiscord(latestTweet, term);
-        }
+        results[hashtag] = {
+          tweets: tweets.slice(0, 10),
+          scrapedAt: new Date().toISOString(),
+        };
       } catch (error) {
         console.error(`Error scraping hashtag ${hashtag}:`, error);
+        results[hashtag] = {
+          error: error.message,
+          scrapedAt: new Date().toISOString(),
+        };
       }
     }
-    await page.close();
-  }
 
-  async sendToDiscord(tweet, hashtag) {
-    await axios.post(
-      config.webhookUrl,
-      this.formatHashtagTweetForDiscord(tweet, hashtag)
-    );
-  }
-}
-
-async function runHashtagScraper() {
-  let browser;
-
-  try {
-    browser = await puppeteer.launch({
-      headless: "new",
-      args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    });
-
-    // Login
-    const loginPage = await browser.newPage();
-    await loginPage.goto("https://twitter.com/i/flow/login");
-    await loginPage.waitForSelector('input[autocomplete="username"]');
-    await loginPage.type(
-      'input[autocomplete="username"]',
-      config.twitter.credentials.username
-    );
-    await loginPage.keyboard.press("Enter");
-    await loginPage.waitForSelector('input[type="password"]');
-    await loginPage.type(
-      'input[type="password"]',
-      config.twitter.credentials.password
-    );
-    await loginPage.keyboard.press("Enter");
-    await loginPage.waitForSelector('a[aria-label="Home"]', { timeout: 30000 });
-    await loginPage.close();
-
-    const scraper = new HashtagScraper(browser);
-    await scraper.scrapeHashtags(config.targets.hashtags);
-
-    parentPort.postMessage("Hashtag scraping completed successfully");
+    return results;
   } catch (error) {
-    console.error("Error in hashtag scraper:", error);
-    parentPort.postMessage({ error: error.message });
-  } finally {
-    if (browser) await browser.close();
+    console.error("Scraping failed:", error);
+    throw error;
   }
 }
 
-runHashtagScraper();
+// Handle graceful shutdown
+async function cleanup() {
+  if (browser) {
+    await browser.close();
+    browser = null;
+    page = null;
+  }
+}
+
+process.on("SIGINT", cleanup);
+process.on("SIGTERM", cleanup);
+
+// Main worker function
+async function runWorker() {
+  try {
+    const results = await scrapeHashtags(workerData.config.targets.hashtags);
+
+    // Send results back to main thread
+    if (parentPort) {
+      parentPort.postMessage(results);
+    }
+
+    return results;
+  } catch (error) {
+    console.error("Worker error:", error);
+    if (parentPort) {
+      parentPort.postMessage({ error: error.message });
+    }
+    throw error;
+  }
+}
+
+// Start the worker
+runWorker();

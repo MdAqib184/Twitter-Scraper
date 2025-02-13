@@ -195,23 +195,28 @@ async function runProfileScraper() {
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
 
-    // Login
-    const loginPage = await browser.newPage();
-    await loginPage.goto("https://twitter.com/i/flow/login");
-    await loginPage.waitForSelector('input[autocomplete="username"]');
-    await loginPage.type(
-      'input[autocomplete="username"]',
-      config.twitter.credentials.username
-    );
-    await loginPage.keyboard.press("Enter");
-    await loginPage.waitForSelector('input[type="password"]');
-    await loginPage.type(
-      'input[type="password"]',
+    console.log(
+      config.twitter.credentials.username,
       config.twitter.credentials.password
     );
-    await loginPage.keyboard.press("Enter");
-    await loginPage.waitForSelector('a[aria-label="Home"]', { timeout: 30000 });
-    await loginPage.close();
+
+    // Login
+    // const loginPage = await browser.newPage();
+    // await loginPage.goto("https://twitter.com/i/flow/login");
+    // await loginPage.waitForSelector('input[autocomplete="username"]');
+    // await loginPage.type(
+    //   'input[autocomplete="username"]',
+    //   config.twitter.credentials.username
+    // );
+    // await loginPage.keyboard.press("Enter");
+    // await loginPage.waitForSelector('input[type="password"]');
+    // await loginPage.type(
+    //   'input[type="password"]',
+    //   config.twitter.credentials.password
+    // );
+    // await loginPage.keyboard.press("Enter");
+    // await loginPage.waitForSelector('a[aria-label="Home"]', { timeout: 30000 });
+    // await loginPage.close();
 
     const scraper = new ProfileScraper(browser, mongoClient);
     await scraper.scrapeProfiles(config.targets.profiles);

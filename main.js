@@ -3,7 +3,7 @@ const { Worker } = require("worker_threads");
 const cron = require("node-cron");
 const path = require("path");
 
-// Configuration
+// Configuration remains the same as your original
 const CONFIG = {
   mongodb: {
     uri: "mongodb+srv://admin-uwais:password%40123@cluster0.2ieu9.mongodb.net/?retryWrites=true&w=majority",
@@ -11,8 +11,8 @@ const CONFIG = {
   },
   twitter: {
     credentials: {
-      username: "jawed_uwais_21",
-      password: "Iloveux100",
+      username: "MPain2095",
+      password: "BLUE2025#",
     },
   },
   discord: {
@@ -27,6 +27,12 @@ const CONFIG = {
   },
 };
 
+// Keep track of active workers
+let activeWorkers = {
+  profile: null,
+  hashtag: null,
+};
+
 function createWorker(scriptPath, workerData) {
   return new Promise((resolve, reject) => {
     const worker = new Worker(scriptPath, { workerData });
@@ -38,6 +44,8 @@ function createWorker(scriptPath, workerData) {
         reject(new Error(`Worker stopped with exit code ${code}`));
       }
     });
+
+    return worker;
   });
 }
 
@@ -45,34 +53,58 @@ async function runScrapers() {
   try {
     console.log("Starting scraper workers:", new Date().toISOString());
 
-    const profileWorker = createWorker(
-      path.join(__dirname, "profileScraper.js"),
-      {
-        config: {
-          ...CONFIG,
-          webhookUrl: CONFIG.discord.profileWebhook,
-        },
-      }
-    );
+    // Create profile worker if not exists
+    if (!activeWorkers.profile) {
+      activeWorkers.profile = createWorker(
+        path.join(__dirname, "profileScraper.js"),
+        {
+          config: {
+            ...CONFIG,
+            webhookUrl: CONFIG.discord.profileWebhook,
+          },
+        }
+      );
+    }
 
-    const hashtagWorker = createWorker(
-      path.join(__dirname, "hashtagScraper.js"),
-      {
-        config: {
-          ...CONFIG,
-          webhookUrl: CONFIG.discord.hashtagWebhook,
-        },
-      }
-    );
+    // Create hashtag worker if not exists
+    if (!activeWorkers.hashtag) {
+      activeWorkers.hashtag = createWorker(
+        path.join(__dirname, "hashtagScraper.js"),
+        {
+          config: {
+            ...CONFIG,
+            webhookUrl: CONFIG.discord.hashtagWebhook,
+          },
+        }
+      );
+    }
 
     // Run workers in parallel
-    const results = await Promise.all([profileWorker, hashtagWorker]);
+    const results = await Promise.all([
+      activeWorkers.profile,
+      activeWorkers.hashtag,
+    ]);
     console.log("Scraping completed:", results);
   } catch (error) {
     console.error("Error running scrapers:", error);
+    // Reset workers on error
+    activeWorkers = {
+      profile: null,
+      hashtag: null,
+    };
   }
 }
 
+// Graceful shutdown handling
+process.on("SIGINT", async () => {
+  console.log("Shutting down workers...");
+  activeWorkers = {
+    profile: null,
+    hashtag: null,
+  };
+  process.exit(0);
+});
+
 // Start the cron job
 console.log("Starting Twitter scraper cron job...");
-cron.schedule("*/2 * * * *", runScrapers);
+cron.schedule("* * * * *", runScrapers);

@@ -195,11 +195,6 @@ async function runProfileScraper() {
       args: ["--no-sandbox", "--disable-setuid-sandbox"],
     });
 
-    console.log(
-      config.twitter.credentials.username,
-      config.twitter.credentials.password
-    );
-
     // Login
     // const loginPage = await browser.newPage();
     // await loginPage.goto("https://twitter.com/i/flow/login");
@@ -218,8 +213,8 @@ async function runProfileScraper() {
     // await loginPage.waitForSelector('a[aria-label="Home"]', { timeout: 30000 });
     // await loginPage.close();
 
-    const scraper = new ProfileScraper(browser, mongoClient);
-    await scraper.scrapeProfiles(config.targets.profiles);
+    // const scraper = new ProfileScraper(browser, mongoClient);
+    // await scraper.scrapeProfiles(config.targets.profiles);
 
     parentPort.postMessage("Profile scraping completed successfully");
   } catch (error) {
